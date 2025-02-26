@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
+#include <bitset>
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -37,14 +38,35 @@ U8G2_SSD1305_128X32_ADAFRUIT_F_HW_I2C u8g2(U8G2_R0);
 
 //Function to set outputs using key matrix
 void setOutMuxBit(const uint8_t bitIdx, const bool value) {
-      digitalWrite(REN_PIN,LOW);
-      digitalWrite(RA0_PIN, bitIdx & 0x01);
-      digitalWrite(RA1_PIN, bitIdx & 0x02);
-      digitalWrite(RA2_PIN, bitIdx & 0x04);
-      digitalWrite(OUT_PIN,value);
-      digitalWrite(REN_PIN,HIGH);
-      delayMicroseconds(2);
-      digitalWrite(REN_PIN,LOW);
+  digitalWrite(REN_PIN,LOW);
+  digitalWrite(RA0_PIN, bitIdx & 0x01);
+  digitalWrite(RA1_PIN, bitIdx & 0x02);
+  digitalWrite(RA2_PIN, bitIdx & 0x04);
+  digitalWrite(OUT_PIN,value);
+  digitalWrite(REN_PIN,HIGH);
+  delayMicroseconds(2);
+  digitalWrite(REN_PIN,LOW);
+}
+
+std::bitset<4> readCols(){
+  // set each row select address (RA0, RA1, RA2) low but row select enable (REN) high
+  digitalWrite(RA0_PIN, LOW);
+  digitalWrite(RA1_PIN, LOW);
+  digitalWrite(RA2_PIN, LOW);
+  digitalWrite(REN_PIN, HIGH);
+
+  delayMicroseconds(3); // Small delay for stability
+
+  std::bitset<4> result;
+  result[0] = digitalRead(C0_PIN);
+  result[1] = digitalRead(C1_PIN);
+  result[2] = digitalRead(C2_PIN);
+  result[3] = digitalRead(C3_PIN);
+
+  // Disable row select
+  digitalWrite(REN_PIN, LOW);
+
+  return result;
 }
 
 void setup() {
@@ -88,12 +110,14 @@ void loop() {
 
   next += interval;
 
+  std::bitset<4> keys = readCols();
+
   //Update display
   u8g2.clearBuffer();         // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
   u8g2.drawStr(2,10,"Helllo World!");  // write something to the internal memory
   u8g2.setCursor(2,20);
-  u8g2.print(count++);
+  u8g2.print(keys.to_ulong(),HEX); 
   u8g2.sendBuffer();          // transfer internal memory to the display
 
   //Toggle LED
