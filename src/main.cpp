@@ -49,24 +49,27 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
 }
 
 std::bitset<4> readCols(){
-  // set each row select address (RA0, RA1, RA2) low but row select enable (REN) high
-  digitalWrite(RA0_PIN, LOW);
-  digitalWrite(RA1_PIN, LOW);
-  digitalWrite(RA2_PIN, LOW);
-  digitalWrite(REN_PIN, HIGH);
-
-  delayMicroseconds(3); // Small delay for stability
-
   std::bitset<4> result;
+
   result[0] = digitalRead(C0_PIN);
   result[1] = digitalRead(C1_PIN);
   result[2] = digitalRead(C2_PIN);
   result[3] = digitalRead(C3_PIN);
 
+  return result;
+}
+
+void setRow(uint8_t rowIdx){
   // Disable row select
   digitalWrite(REN_PIN, LOW);
 
-  return result;
+  // Set row select address
+  digitalWrite(RA0_PIN, rowIdx & 0x01);
+  digitalWrite(RA1_PIN, rowIdx & 0x02);
+  digitalWrite(RA2_PIN, rowIdx & 0x04);
+
+  // Enable row select
+  digitalWrite(REN_PIN, HIGH);
 }
 
 void setup() {
@@ -110,14 +113,28 @@ void loop() {
 
   next += interval;
 
-  std::bitset<4> keys = readCols();
+  std::bitset<32> all_keys;
+  for (uint8_t row=0; row<3; row++) {
+    setRow(row);
+    delayMicroseconds(3);
+    std::bitset<4> cols = readCols();
+
+    all_keys[row * 4] = cols[0];
+    all_keys[row * 4 + 1] = cols[1];
+    all_keys[row * 4 + 2] = cols[2];
+    all_keys[row * 4 + 3] = cols[3];
+  }
+
+  // Print the key matrix state
+  Serial.print("Key states: ");
+  Serial.println(all_keys.to_string().c_str());
 
   //Update display
   u8g2.clearBuffer();         // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-  u8g2.drawStr(2,10,"Helllo World!");  // write something to the internal memory
-  u8g2.setCursor(2,20);
-  u8g2.print(keys.to_ulong(),HEX); 
+  u8g2.drawStr(2,10,"Keys: ");  // write something to the internal memory
+  u8g2.setCursor(40,10);
+  u8g2.print(all_keys.to_ulong(),HEX); 
   u8g2.sendBuffer();          // transfer internal memory to the display
 
   //Toggle LED
