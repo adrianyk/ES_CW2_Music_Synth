@@ -4,6 +4,8 @@
 
 //Constants
   const uint32_t interval = 100; //Display update interval
+  const char* noteNames[12] = {"C4", "C#4", "D4", "D#4", "E4", "F4", 
+                               "F#4", "G4", "G#4", "A4", "A#4", "B4"};
   const uint32_t stepSizes[12] = { // Step sizes of 12 notes
     51076056, // C4
     54113197, // C#4
@@ -47,6 +49,9 @@
   const int HKOW_BIT = 5;
   const int HKOE_BIT = 6;
 
+// Global variable to store current step size
+volatile uint32_t currentStepSize = 0;
+
 //Display driver object
 U8G2_SSD1305_128X32_ADAFRUIT_F_HW_I2C u8g2(U8G2_R0);
 
@@ -62,7 +67,7 @@ void setOutMuxBit(const uint8_t bitIdx, const bool value) {
   digitalWrite(REN_PIN,LOW);
 }
 
-std::bitset<4> readCols(){
+std::bitset<4> readCols() {
   std::bitset<4> result;
 
   result[0] = digitalRead(C0_PIN);
@@ -73,7 +78,7 @@ std::bitset<4> readCols(){
   return result;
 }
 
-void setRow(uint8_t rowIdx){
+void setRow(uint8_t rowIdx) {
   // Disable row select
   digitalWrite(REN_PIN, LOW);
 
@@ -127,28 +132,51 @@ void loop() {
 
   next += interval;
 
-  std::bitset<32> all_keys;
-  for (uint8_t row=0; row<3; row++) {
+  std::bitset<32> all_inputs;
+  int keyIndex;
+  int lastKeyPressed = -1; // default: no key pressed
+
+  for (uint8_t row = 0; row < 3; row++) {
     setRow(row);
     delayMicroseconds(3);
-    std::bitset<4> cols = readCols();
+    std::bitset<4> result = readCols();
 
-    all_keys[row * 4] = cols[0];
-    all_keys[row * 4 + 1] = cols[1];
-    all_keys[row * 4 + 2] = cols[2];
-    all_keys[row * 4 + 3] = cols[3];
+    for (uint8_t col = 0; col < 4; col++) {
+      keyIndex = row * 4 + col;
+      if (keyIndex<12) {  // Only first 12 index are the piano keys
+        all_inputs[keyIndex] = result[col];
+
+        if (!result[col]) {  // Store last pressed key if a key is pressed
+          lastKeyPressed = keyIndex;
+        }
+      }
+    }
+  }
+
+  // Checking which key is pressed and get the step size
+  const char* pressedKey;
+  if (lastKeyPressed != -1) {
+    currentStepSize = stepSizes[lastKeyPressed];
+    pressedKey = noteNames[lastKeyPressed];
+  } else {
+    currentStepSize = 0;
+    pressedKey = "None";
   }
 
   // Print the key matrix state
-  Serial.print("Key states: ");
-  Serial.println(all_keys.to_string().c_str());
+  // Serial.print("Key states: ");
+  // Serial.println(all_inputs.to_string().c_str());
+  Serial.print("Pressed key: ");
+  Serial.print(pressedKey);
+  Serial.print(", Step size: ");
+  Serial.println(currentStepSize);
 
   //Update display
   u8g2.clearBuffer();         // clear the internal memory
   u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-  u8g2.drawStr(2,10,"Keys: ");  // write something to the internal memory
-  u8g2.setCursor(40,10);
-  u8g2.print(all_keys.to_ulong(),HEX); 
+  u8g2.drawStr(2,10,"Pressed key: ");  // write something to the internal memory
+  u8g2.setCursor(75,10);
+  u8g2.print(pressedKey); 
   u8g2.sendBuffer();          // transfer internal memory to the display
 
   //Toggle LED
