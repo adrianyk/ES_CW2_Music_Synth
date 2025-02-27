@@ -4,6 +4,20 @@
 
 //Constants
   const uint32_t interval = 100; //Display update interval
+  const uint32_t stepSizes[12] = { // Step sizes of 12 notes
+    51076056, // C4
+    54113197, // C#4
+    57330935, // D4
+    60740009, // D#4
+    64351798, // E4
+    68178356, // F4
+    72232452, // F#4
+    76527617, // G4
+    81078186, // G#4
+    85899345, // A4 (440 Hz)
+    91007186, // A#4
+    96418755  // B4
+  };
 
 //Pin definitions
   //Row select and enable
