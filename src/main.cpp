@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <U8g2lib.h>
 #include <bitset>
+#include <HardwareTimer.h>
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -52,6 +53,9 @@
 // Global variable to store current step size
 volatile uint32_t currentStepSize = 0;
 
+// Timer object
+HardwareTimer sampleTimer(TIM1);
+
 //Display driver object
 U8G2_SSD1305_128X32_ADAFRUIT_F_HW_I2C u8g2(U8G2_R0);
 
@@ -91,6 +95,14 @@ void setRow(uint8_t rowIdx) {
   digitalWrite(REN_PIN, HIGH);
 }
 
+void sampleISR() {
+  static uint32_t phaseAcc = 0; // Phase accumulator, static (stores value between calls)
+  phaseAcc += currentStepSize;  // Increment phase
+
+  int32_t Vout = (phaseAcc >> 24) - 128;  // Convert to sawtooth waveform
+  analogWrite(OUTR_PIN, Vout + 128);
+}
+
 void setup() {
   // put your setup code here, to run once:
 
@@ -121,6 +133,11 @@ void setup() {
   //Initialise UART
   Serial.begin(9600);
   Serial.println("Hello World");
+
+  // Timer and interrupt set up
+  sampleTimer.setOverflow(22000, HERTZ_FORMAT);
+  sampleTimer.attachInterrupt(sampleISR);
+  sampleTimer.resume();
 }
 
 void loop() {
