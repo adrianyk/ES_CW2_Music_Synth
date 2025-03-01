@@ -171,15 +171,16 @@ void loop() {
   }
 
   // Checking which key is pressed and get the step size
-  const char* pressedKey;
+  const char* pressedKey = "None";
+  uint32_t tmpStepSize = 0; // Temporary variable for step size
   if (lastKeyPressed != -1) {
-    currentStepSize = stepSizes[lastKeyPressed];
+    tmpStepSize = stepSizes[lastKeyPressed];
     pressedKey = noteNames[lastKeyPressed];
-  } else {
-    currentStepSize = 0;
-    pressedKey = "None";
   }
 
+  // Only update the global variable once
+  currentStepSize = tmpStepSize;
+  
   // Print the key matrix state
   // Serial.print("Key states: ");
   // Serial.println(all_inputs.to_string().c_str());
