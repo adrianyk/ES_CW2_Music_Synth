@@ -5,7 +5,6 @@
 #include <STM32FreeRTOS.h>
 
 //Constants
-  const uint32_t interval = 100; //Display update interval
   const char* noteNames[12] = {"C4", "C#4", "D4", "D#4", "E4", "F4", 
                                "F#4", "G4", "G#4", "A4", "A#4", "B4"};
   const uint32_t stepSizes[12] = { // Step sizes of 12 notes
@@ -56,7 +55,8 @@ volatile uint32_t currentStepSize = 0;
 
 // Global struct to store system state that is used in more than one thread
 struct {
-  std::bitset<32> inputs;  
+  std::bitset<32> inputs;
+  SemaphoreHandle_t mutex;
 } sysState;
 
 // Timer object
@@ -129,8 +129,9 @@ void scanKeysTask(void * pvParameters) {
       }
     }
   
-    // Update system state
-    sysState.inputs = all_inputs;
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);
+    sysState.inputs = all_inputs;     // Update system state
+    xSemaphoreGive(sysState.mutex);
     
     // Checking which key is pressed and get the step size
     uint32_t localCurrentStepSize = 0; // Temporary local variable for step size
@@ -151,11 +152,13 @@ void displayUpdateTask(void * pvParameters) {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
     const char* pressedKey = "None";
+    xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     for (int i = 0; i < 12; i++) {    // Only first 12 bits are piano keys
       if (!sysState.inputs[i]) {      // If bit is LOW (means that key is pressed)
         pressedKey = noteNames[i];
       }
     }
+    xSemaphoreGive(sysState.mutex);
 
     Serial.print("Pressed key: ");
     Serial.print(pressedKey);
@@ -239,6 +242,9 @@ void setup() {
   NULL,			                /* Parameter passed into the task */
   1,			                  /* Task priority */
   &displayUpdateHandle );	  /* Pointer to store the task handle */
+  
+  // Create mutex handle
+  sysState.mutex = xSemaphoreCreateMutex();
 
   // Start RTOS scheduler
   vTaskStartScheduler();
