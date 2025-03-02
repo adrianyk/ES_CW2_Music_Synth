@@ -144,6 +144,37 @@ void scanKeysTask(void * pvParameters) {
   }
 }
 
+void displayUpdateTask(void * pvParameters) {
+  const TickType_t xFrequency = 100/portTICK_PERIOD_MS;  // Initiation interval: 100ms
+  TickType_t xLastWakeTime = xTaskGetTickCount();        // Time (tick count) of last initiation
+  while (1) {
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+    const char* pressedKey = "None";
+    for (int i = 0; i < 12; i++) {    // Only first 12 bits are piano keys
+      if (!sysState.inputs[i]) {      // If bit is LOW (means that key is pressed)
+        pressedKey = noteNames[i];
+      }
+    }
+
+    Serial.print("Pressed key: ");
+    Serial.print(pressedKey);
+    Serial.print(", Step size: ");
+    Serial.println(currentStepSize);
+
+    //Update display
+    u8g2.clearBuffer();                   // clear the internal memory
+    u8g2.setFont(u8g2_font_ncenB08_tr);   // choose a suitable font
+    u8g2.drawStr(2,10,"Pressed key: ");   // write something to the internal memory
+    u8g2.setCursor(75,10);
+    u8g2.print(pressedKey); 
+    u8g2.sendBuffer();                    // transfer internal memory to the display
+
+    //Toggle LED
+    digitalToggle(LED_BUILTIN);
+  }
+}
+
 void sampleISR() {
   static uint32_t phaseAcc = 0; // Phase accumulator, static (stores value between calls)
   uint32_t localCurrentStepSize;
@@ -197,8 +228,17 @@ void setup() {
   "scanKeys",		      /* Text name for the task */
   64,      		        /* Stack size in words, not bytes */
   NULL,			          /* Parameter passed into the task */
-  1,			            /* Task priority */
+  2,			            /* Task priority */
   &scanKeysHandle );	/* Pointer to store the task handle */
+
+  TaskHandle_t displayUpdateHandle = NULL;
+  xTaskCreate(
+  displayUpdateTask,		    /* Function that implements the task */
+  "displayUpdate",		      /* Text name for the task */
+  256,      		            /* Stack size in words, not bytes */
+  NULL,			                /* Parameter passed into the task */
+  1,			                  /* Task priority */
+  &displayUpdateHandle );	  /* Pointer to store the task handle */
 
   // Start RTOS scheduler
   vTaskStartScheduler();
@@ -206,37 +246,5 @@ void setup() {
 
 void loop() {
   // put your main code here, to run repeatedly:
-  static uint32_t next = millis();
-  static uint32_t count = 0;
-
-  while (millis() < next);  //Wait for next interval
-
-  next += interval;
-
-  const char* pressedKey = "None";
-  for (int i = 0; i < 12; i++) {  // Only first 12 bits are piano keys
-    if (!sysState.inputs[i]) {    // If bit is LOW (means that key is pressed)
-      pressedKey = noteNames[i];
-    }
-  }
-
-  // Print the key matrix state
-  // Serial.print("Key states: ");
-  // Serial.println(all_inputs.to_string().c_str());
-  Serial.print("Pressed key: ");
-  Serial.print(pressedKey);
-  Serial.print(", Step size: ");
-  Serial.println(currentStepSize);
-
-  //Update display
-  u8g2.clearBuffer();         // clear the internal memory
-  u8g2.setFont(u8g2_font_ncenB08_tr); // choose a suitable font
-  u8g2.drawStr(2,10,"Pressed key: ");  // write something to the internal memory
-  u8g2.setCursor(75,10);
-  u8g2.print(pressedKey); 
-  u8g2.sendBuffer();          // transfer internal memory to the display
-
-  //Toggle LED
-  digitalToggle(LED_BUILTIN);
   
 }
