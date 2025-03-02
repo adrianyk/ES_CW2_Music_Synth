@@ -97,7 +97,9 @@ void setRow(uint8_t rowIdx) {
 
 void sampleISR() {
   static uint32_t phaseAcc = 0; // Phase accumulator, static (stores value between calls)
-  phaseAcc += currentStepSize;  // Increment phase
+  uint32_t localCurrentStepSize;
+  __atomic_load(&currentStepSize, &localCurrentStepSize, __ATOMIC_RELAXED);
+  phaseAcc += localCurrentStepSize;  // Increment phase
 
   int32_t Vout = (phaseAcc >> 24) - 128;  // Convert to sawtooth waveform
   analogWrite(OUTR_PIN, Vout + 128);
@@ -172,14 +174,15 @@ void loop() {
 
   // Checking which key is pressed and get the step size
   const char* pressedKey = "None";
-  uint32_t tmpStepSize = 0; // Temporary variable for step size
+  uint32_t localCurrentStepSize = 0; // Temporary local variable for step size
   if (lastKeyPressed != -1) {
-    tmpStepSize = stepSizes[lastKeyPressed];
+    localCurrentStepSize = stepSizes[lastKeyPressed];
     pressedKey = noteNames[lastKeyPressed];
   }
 
   // Only update the global variable once
-  currentStepSize = tmpStepSize;
+  // Atomic store to ensure thread safety
+  __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
   
   // Print the key matrix state
   // Serial.print("Key states: ");
