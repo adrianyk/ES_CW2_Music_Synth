@@ -53,6 +53,11 @@
 // Global variable to store current step size
 volatile uint32_t currentStepSize = 0;
 
+// Global struct to store system state that is used in more than one thread
+struct {
+  std::bitset<32> inputs;  
+} sysState;
+
 // Timer object
 HardwareTimer sampleTimer(TIM1);
 
@@ -93,6 +98,42 @@ void setRow(uint8_t rowIdx) {
 
   // Enable row select
   digitalWrite(REN_PIN, HIGH);
+}
+
+void scanKeysTask(void * pvParameters) {
+  std::bitset<32> all_inputs;
+  int keyIndex;
+  int lastKeyPressed = -1; // default: no key pressed
+
+  for (uint8_t row = 0; row < 3; row++) {
+    setRow(row);
+    delayMicroseconds(3);
+    std::bitset<4> result = readCols();
+
+    for (uint8_t col = 0; col < 4; col++) {
+      keyIndex = row * 4 + col;
+      if (keyIndex<12) {  // Only first 12 index are the piano keys
+        all_inputs[keyIndex] = result[col];
+
+        if (!result[col]) {  // Store last pressed key if a key is pressed
+          lastKeyPressed = keyIndex;
+        }
+      }
+    }
+  }
+
+  // Update system state
+  sysState.inputs = all_inputs;
+  
+  // Checking which key is pressed and get the step size
+  uint32_t localCurrentStepSize = 0; // Temporary local variable for step size
+  if (lastKeyPressed != -1) {
+    localCurrentStepSize = stepSizes[lastKeyPressed];
+  }
+
+  // Only update the global variable once
+  // Atomic store to ensure thread safety
+  __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
 }
 
 void sampleISR() {
@@ -151,39 +192,15 @@ void loop() {
 
   next += interval;
 
-  std::bitset<32> all_inputs;
-  int keyIndex;
-  int lastKeyPressed = -1; // default: no key pressed
+  scanKeysTask(NULL);
 
-  for (uint8_t row = 0; row < 3; row++) {
-    setRow(row);
-    delayMicroseconds(3);
-    std::bitset<4> result = readCols();
-
-    for (uint8_t col = 0; col < 4; col++) {
-      keyIndex = row * 4 + col;
-      if (keyIndex<12) {  // Only first 12 index are the piano keys
-        all_inputs[keyIndex] = result[col];
-
-        if (!result[col]) {  // Store last pressed key if a key is pressed
-          lastKeyPressed = keyIndex;
-        }
-      }
+  const char* pressedKey = "None";
+  for (int i = 0; i < 12; i++) {  // Only first 12 bits are piano keys
+    if (!sysState.inputs[i]) {    // If bit is LOW (means that key is pressed)
+      pressedKey = noteNames[i];
     }
   }
 
-  // Checking which key is pressed and get the step size
-  const char* pressedKey = "None";
-  uint32_t localCurrentStepSize = 0; // Temporary local variable for step size
-  if (lastKeyPressed != -1) {
-    localCurrentStepSize = stepSizes[lastKeyPressed];
-    pressedKey = noteNames[lastKeyPressed];
-  }
-
-  // Only update the global variable once
-  // Atomic store to ensure thread safety
-  __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
-  
   // Print the key matrix state
   // Serial.print("Key states: ");
   // Serial.println(all_inputs.to_string().c_str());
