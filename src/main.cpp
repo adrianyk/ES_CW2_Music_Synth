@@ -2,6 +2,7 @@
 #include <U8g2lib.h>
 #include <bitset>
 #include <HardwareTimer.h>
+#include <STM32FreeRTOS.h>
 
 //Constants
   const uint32_t interval = 100; //Display update interval
@@ -101,39 +102,46 @@ void setRow(uint8_t rowIdx) {
 }
 
 void scanKeysTask(void * pvParameters) {
-  std::bitset<32> all_inputs;
-  int keyIndex;
-  int lastKeyPressed = -1; // default: no key pressed
+  const TickType_t xFrequency = 50/portTICK_PERIOD_MS;  // Initiation interval: 50ms
+  TickType_t xLastWakeTime = xTaskGetTickCount();       // Time (tick count) of last initiation
 
-  for (uint8_t row = 0; row < 3; row++) {
-    setRow(row);
-    delayMicroseconds(3);
-    std::bitset<4> result = readCols();
+  while (1) {
+    vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
-    for (uint8_t col = 0; col < 4; col++) {
-      keyIndex = row * 4 + col;
-      if (keyIndex<12) {  // Only first 12 index are the piano keys
-        all_inputs[keyIndex] = result[col];
-
-        if (!result[col]) {  // Store last pressed key if a key is pressed
-          lastKeyPressed = keyIndex;
+    std::bitset<32> all_inputs;
+    int keyIndex;
+    int lastKeyPressed = -1; // default: no key pressed
+  
+    for (uint8_t row = 0; row < 3; row++) {
+      setRow(row);
+      delayMicroseconds(3);
+      std::bitset<4> result = readCols();
+  
+      for (uint8_t col = 0; col < 4; col++) {
+        keyIndex = row * 4 + col;
+        if (keyIndex<12) {  // Only first 12 index are the piano keys
+          all_inputs[keyIndex] = result[col];
+  
+          if (!result[col]) {  // Store last pressed key if a key is pressed
+            lastKeyPressed = keyIndex;
+          }
         }
       }
     }
-  }
-
-  // Update system state
-  sysState.inputs = all_inputs;
   
-  // Checking which key is pressed and get the step size
-  uint32_t localCurrentStepSize = 0; // Temporary local variable for step size
-  if (lastKeyPressed != -1) {
-    localCurrentStepSize = stepSizes[lastKeyPressed];
+    // Update system state
+    sysState.inputs = all_inputs;
+    
+    // Checking which key is pressed and get the step size
+    uint32_t localCurrentStepSize = 0; // Temporary local variable for step size
+    if (lastKeyPressed != -1) {
+      localCurrentStepSize = stepSizes[lastKeyPressed];
+    }
+  
+    // Only update the global variable once
+    // Atomic store to ensure thread safety
+    __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
   }
-
-  // Only update the global variable once
-  // Atomic store to ensure thread safety
-  __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
 }
 
 void sampleISR() {
@@ -181,6 +189,19 @@ void setup() {
   sampleTimer.setOverflow(22000, HERTZ_FORMAT);
   sampleTimer.attachInterrupt(sampleISR);
   sampleTimer.resume();
+
+  // Create RTOS thread for key scanning
+  TaskHandle_t scanKeysHandle = NULL;
+  xTaskCreate(
+  scanKeysTask,		    /* Function that implements the task */
+  "scanKeys",		      /* Text name for the task */
+  64,      		        /* Stack size in words, not bytes */
+  NULL,			          /* Parameter passed into the task */
+  1,			            /* Task priority */
+  &scanKeysHandle );	/* Pointer to store the task handle */
+
+  // Start RTOS scheduler
+  vTaskStartScheduler();
 }
 
 void loop() {
@@ -191,8 +212,6 @@ void loop() {
   while (millis() < next);  //Wait for next interval
 
   next += interval;
-
-  scanKeysTask(NULL);
 
   const char* pressedKey = "None";
   for (int i = 0; i < 12; i++) {  // Only first 12 bits are piano keys
