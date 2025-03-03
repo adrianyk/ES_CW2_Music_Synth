@@ -156,7 +156,6 @@ void scanKeysTask(void * pvParameters) {
   
     xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     sysState.inputs = all_inputs;     // Update system state
-    sysState.knob3Rotation = localKnob3Rotation;
     xSemaphoreGive(sysState.mutex);
     
     // Checking which key is pressed and get the step size
@@ -165,9 +164,9 @@ void scanKeysTask(void * pvParameters) {
       localCurrentStepSize = stepSizes[lastKeyPressed];
     }
   
-    // Only update the global variable once
     // Atomic store to ensure thread safety
     __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
+    __atomic_store_n(&sysState.knob3Rotation, localKnob3Rotation, __ATOMIC_RELAXED);
   }
 }
 
@@ -220,7 +219,8 @@ void sampleISR() {
 
   int32_t Vout = (phaseAcc >> 24) - 128;  // Convert to sawtooth waveform
 
-  int32_t localKnob3Rotation = sysState.knob3Rotation;
+  int32_t localKnob3Rotation;
+  __atomic_load(&sysState.knob3Rotation, &localKnob3Rotation, __ATOMIC_RELAXED);
   Vout = Vout >> (8 - localKnob3Rotation);  // Volume control
   analogWrite(OUTR_PIN, Vout + 128);
 }
