@@ -57,6 +57,7 @@ volatile uint32_t currentStepSize = 0;
 struct {
   std::bitset<32> inputs;
   SemaphoreHandle_t mutex;
+  int32_t knob3Rotation; // Tracks the total rotation
 } sysState;
 
 // Timer object
@@ -102,35 +103,49 @@ void setRow(uint8_t rowIdx) {
 }
 
 void scanKeysTask(void * pvParameters) {
-  const TickType_t xFrequency = 50/portTICK_PERIOD_MS;  // Initiation interval: 50ms
+  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;  // Initiation interval: 50ms
   TickType_t xLastWakeTime = xTaskGetTickCount();       // Time (tick count) of last initiation
 
   while (1) {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
     std::bitset<32> all_inputs;
-    int keyIndex;
     int lastKeyPressed = -1; // default: no key pressed
-  
-    for (uint8_t row = 0; row < 3; row++) {
+    for (uint8_t row = 0; row < 4; row++) {
       setRow(row);
       delayMicroseconds(3);
       std::bitset<4> result = readCols();
-  
       for (uint8_t col = 0; col < 4; col++) {
-        keyIndex = row * 4 + col;
-        if (keyIndex<12) {  // Only first 12 index are the piano keys
-          all_inputs[keyIndex] = result[col];
-  
-          if (!result[col]) {  // Store last pressed key if a key is pressed
-            lastKeyPressed = keyIndex;
-          }
+        int index = row * 4 + col;
+        all_inputs[index] = result[col];
+        if (index < 12 && !result[col]) {   // Only first 12 are piano keys AND if a key is pressed
+            lastKeyPressed = index;
         }
       }
     }
+
+    // Process knob rotation (row 3, columns 0 and 1)
+    uint8_t knob3CurrState = (all_inputs[13] << 1) | all_inputs[12]; // {B, A}
+    static uint8_t knob3PrevState = 0b00;  // Static: retains value between function calls
+    static uint8_t knob3Rotation = 0;
+
+    // Check transition and update rotation variable
+    if ((knob3PrevState == 0b00 && knob3CurrState == 0b01) ||
+        (knob3PrevState == 0b01 && knob3CurrState == 0b11) ||
+        (knob3PrevState == 0b11 && knob3CurrState == 0b10) ||
+        (knob3PrevState == 0b10 && knob3CurrState == 0b00)) {
+      knob3Rotation += 1; // Clockwise
+    } else if ((knob3PrevState == 0b00 && knob3CurrState == 0b10) ||
+               (knob3PrevState == 0b10 && knob3CurrState == 0b11) ||
+               (knob3PrevState == 0b11 && knob3CurrState == 0b01) ||
+               (knob3PrevState == 0b01 && knob3CurrState == 0b00)) {
+      knob3Rotation -= 1; // Counterclockwise
+    }
+    knob3PrevState = knob3CurrState; 
   
     xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     sysState.inputs = all_inputs;     // Update system state
+    sysState.knob3Rotation = knob3Rotation;
     xSemaphoreGive(sysState.mutex);
     
     // Checking which key is pressed and get the step size
@@ -152,25 +167,33 @@ void displayUpdateTask(void * pvParameters) {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
     const char* pressedKey = "None";
+    uint8_t knob3Rotation = 0;
+
     xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     for (int i = 0; i < 12; i++) {    // Only first 12 bits are piano keys
       if (!sysState.inputs[i]) {      // If bit is LOW (means that key is pressed)
         pressedKey = noteNames[i];
       }
     }
+    knob3Rotation = sysState.knob3Rotation;
     xSemaphoreGive(sysState.mutex);
 
     Serial.print("Pressed key: ");
     Serial.print(pressedKey);
     Serial.print(", Step size: ");
-    Serial.println(currentStepSize);
+    Serial.print(currentStepSize);
+    Serial.print(", Knob 3 Rotation: ");
+    Serial.println(knob3Rotation);
 
     //Update display
     u8g2.clearBuffer();                   // clear the internal memory
     u8g2.setFont(u8g2_font_ncenB08_tr);   // choose a suitable font
     u8g2.drawStr(2,10,"Pressed key: ");   // write something to the internal memory
     u8g2.setCursor(75,10);
-    u8g2.print(pressedKey); 
+    u8g2.print(pressedKey);
+    u8g2.drawStr(2, 20, "Rotation:");
+    u8g2.setCursor(75, 20);
+    u8g2.print(knob3Rotation);
     u8g2.sendBuffer();                    // transfer internal memory to the display
 
     //Toggle LED
