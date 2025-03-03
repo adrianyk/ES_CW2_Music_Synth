@@ -127,34 +127,36 @@ void scanKeysTask(void * pvParameters) {
     // Process knob rotation (row 3, columns 0 and 1)
     uint8_t knob3CurrState = (all_inputs[13] << 1) | all_inputs[12]; // {B, A}
     static uint8_t knob3PrevState = 0b00;  // Static: retains value between function calls
-    static uint8_t knob3Rotation = 0;
-    static uint8_t lastDirection = 0;      // Last valid rotation direction
+    static int8_t localKnob3Rotation = 0;
+    static int8_t lastDirection = 0;      // Last valid rotation direction
 
     // Check transition and update rotation variable
     if ((knob3PrevState == 0b00 && knob3CurrState == 0b01) ||
         (knob3PrevState == 0b01 && knob3CurrState == 0b11) ||
         (knob3PrevState == 0b11 && knob3CurrState == 0b10) ||
         (knob3PrevState == 0b10 && knob3CurrState == 0b00)) {
-      knob3Rotation += 1; // Clockwise
+      localKnob3Rotation += 1; // Clockwise
       lastDirection = 1;
     } else if ((knob3PrevState == 0b00 && knob3CurrState == 0b10) ||
                (knob3PrevState == 0b10 && knob3CurrState == 0b11) ||
                (knob3PrevState == 0b11 && knob3CurrState == 0b01) ||
                (knob3PrevState == 0b01 && knob3CurrState == 0b00)) {
-      knob3Rotation -= 1; // Counterclockwise
+      localKnob3Rotation -= 1; // Counterclockwise
       lastDirection = -1;
     } else if ((knob3PrevState == 0b00 && knob3CurrState == 0b11) ||
                (knob3PrevState == 0b01 && knob3CurrState == 0b10) ||
                (knob3PrevState == 0b10 && knob3CurrState == 0b01) ||
                (knob3PrevState == 0b11 && knob3CurrState == 0b00)) {
       // Impossible transition detected
-      knob3Rotation += lastDirection; // Assume same direction as last valid transition
+      localKnob3Rotation += lastDirection; // Assume same direction as last valid transition
     }
     knob3PrevState = knob3CurrState; 
+    if (localKnob3Rotation > 8) localKnob3Rotation = 8;
+    if (localKnob3Rotation < 0) localKnob3Rotation = 0;
   
     xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     sysState.inputs = all_inputs;     // Update system state
-    sysState.knob3Rotation = knob3Rotation;
+    sysState.knob3Rotation = localKnob3Rotation;
     xSemaphoreGive(sysState.mutex);
     
     // Checking which key is pressed and get the step size
@@ -217,6 +219,9 @@ void sampleISR() {
   phaseAcc += localCurrentStepSize;  // Increment phase
 
   int32_t Vout = (phaseAcc >> 24) - 128;  // Convert to sawtooth waveform
+
+  int32_t localKnob3Rotation = sysState.knob3Rotation;
+  Vout = Vout >> (8 - localKnob3Rotation);  // Volume control
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
