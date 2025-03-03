@@ -103,7 +103,7 @@ void setRow(uint8_t rowIdx) {
 }
 
 void scanKeysTask(void * pvParameters) {
-  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;  // Initiation interval: 50ms
+  const TickType_t xFrequency = 20/portTICK_PERIOD_MS;  // Initiation interval: 20ms
   TickType_t xLastWakeTime = xTaskGetTickCount();       // Time (tick count) of last initiation
 
   while (1) {
@@ -128,6 +128,7 @@ void scanKeysTask(void * pvParameters) {
     uint8_t knob3CurrState = (all_inputs[13] << 1) | all_inputs[12]; // {B, A}
     static uint8_t knob3PrevState = 0b00;  // Static: retains value between function calls
     static uint8_t knob3Rotation = 0;
+    static uint8_t lastDirection = 0;      // Last valid rotation direction
 
     // Check transition and update rotation variable
     if ((knob3PrevState == 0b00 && knob3CurrState == 0b01) ||
@@ -135,11 +136,19 @@ void scanKeysTask(void * pvParameters) {
         (knob3PrevState == 0b11 && knob3CurrState == 0b10) ||
         (knob3PrevState == 0b10 && knob3CurrState == 0b00)) {
       knob3Rotation += 1; // Clockwise
+      lastDirection = 1;
     } else if ((knob3PrevState == 0b00 && knob3CurrState == 0b10) ||
                (knob3PrevState == 0b10 && knob3CurrState == 0b11) ||
                (knob3PrevState == 0b11 && knob3CurrState == 0b01) ||
                (knob3PrevState == 0b01 && knob3CurrState == 0b00)) {
       knob3Rotation -= 1; // Counterclockwise
+      lastDirection = -1;
+    } else if ((knob3PrevState == 0b00 && knob3CurrState == 0b11) ||
+               (knob3PrevState == 0b01 && knob3CurrState == 0b10) ||
+               (knob3PrevState == 0b10 && knob3CurrState == 0b01) ||
+               (knob3PrevState == 0b11 && knob3CurrState == 0b00)) {
+      // Impossible transition detected
+      knob3Rotation += lastDirection; // Assume same direction as last valid transition
     }
     knob3PrevState = knob3CurrState; 
   
