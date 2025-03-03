@@ -3,6 +3,7 @@
 #include <bitset>
 #include <HardwareTimer.h>
 #include <STM32FreeRTOS.h>
+#include <atomic>
 
 //Constants
   const char* noteNames[12] = {"C4", "C#4", "D4", "D#4", "E4", "F4", 
@@ -53,11 +54,60 @@
 // Global variable to store current step size
 volatile uint32_t currentStepSize = 0;
 
+class Knob {
+private:
+  std::atomic<int32_t> rotation;
+  uint8_t prevState;
+  int8_t lastDirection;
+  int32_t lowerLimit, upperLimit;
+
+public:
+  Knob(int32_t minVal = 0, int32_t maxVal = 8) : rotation(0), prevState(0b00), lastDirection(0), lowerLimit(minVal), upperLimit(maxVal) {}
+  
+  void update(uint8_t currState) {
+    int32_t localRotation = rotation.load();  // Load safely
+    if ((prevState == 0b00 && currState == 0b01) ||
+        (prevState == 0b01 && currState == 0b11) ||
+        (prevState == 0b11 && currState == 0b10) ||
+        (prevState == 0b10 && currState == 0b00)) {
+        localRotation++;
+        lastDirection = 1;
+    } else if ((prevState == 0b00 && currState == 0b10) ||
+               (prevState == 0b10 && currState == 0b11) ||
+               (prevState == 0b11 && currState == 0b01) ||
+               (prevState == 0b01 && currState == 0b00)) {
+        localRotation--;
+        lastDirection = -1;
+    } else if ((prevState == 0b00 && currState == 0b11) ||
+               (prevState == 0b01 && currState == 0b10) ||
+               (prevState == 0b10 && currState == 0b01) ||
+               (prevState == 0b11 && currState == 0b00)) {
+        localRotation += lastDirection;
+    }
+    // Enforce limits
+    if (localRotation < lowerLimit) localRotation = lowerLimit;
+    if (localRotation > upperLimit) localRotation = upperLimit;
+
+    rotation.store(localRotation);  // Store safely
+    prevState = currState;          // Update previous state
+  }
+
+  void setLimits(int32_t minVal, int32_t maxVal) {
+    lowerLimit = minVal;
+    upperLimit = maxVal;
+  }
+
+  int32_t getRotation() const {
+    return rotation.load();
+  }
+};
+
+Knob knob3(0, 8);
+
 // Global struct to store system state that is used in more than one thread
 struct {
   std::bitset<32> inputs;
   SemaphoreHandle_t mutex;
-  int32_t knob3Rotation; // Tracks the total rotation
 } sysState;
 
 // Timer object
@@ -125,35 +175,8 @@ void scanKeysTask(void * pvParameters) {
     }
 
     // Process knob rotation (row 3, columns 0 and 1)
-    uint8_t knob3CurrState = (all_inputs[13] << 1) | all_inputs[12]; // {B, A}
-    static uint8_t knob3PrevState = 0b00;  // Static: retains value between function calls
-    static int8_t localKnob3Rotation = 0;
-    static int8_t lastDirection = 0;      // Last valid rotation direction
-
-    // Check transition and update rotation variable
-    if ((knob3PrevState == 0b00 && knob3CurrState == 0b01) ||
-        (knob3PrevState == 0b01 && knob3CurrState == 0b11) ||
-        (knob3PrevState == 0b11 && knob3CurrState == 0b10) ||
-        (knob3PrevState == 0b10 && knob3CurrState == 0b00)) {
-      localKnob3Rotation += 1; // Clockwise
-      lastDirection = 1;
-    } else if ((knob3PrevState == 0b00 && knob3CurrState == 0b10) ||
-               (knob3PrevState == 0b10 && knob3CurrState == 0b11) ||
-               (knob3PrevState == 0b11 && knob3CurrState == 0b01) ||
-               (knob3PrevState == 0b01 && knob3CurrState == 0b00)) {
-      localKnob3Rotation -= 1; // Counterclockwise
-      lastDirection = -1;
-    } else if ((knob3PrevState == 0b00 && knob3CurrState == 0b11) ||
-               (knob3PrevState == 0b01 && knob3CurrState == 0b10) ||
-               (knob3PrevState == 0b10 && knob3CurrState == 0b01) ||
-               (knob3PrevState == 0b11 && knob3CurrState == 0b00)) {
-      // Impossible transition detected
-      localKnob3Rotation += lastDirection; // Assume same direction as last valid transition
-    }
-    knob3PrevState = knob3CurrState; 
-    if (localKnob3Rotation > 8) localKnob3Rotation = 8;
-    if (localKnob3Rotation < 0) localKnob3Rotation = 0;
-  
+    knob3.update((all_inputs[13] << 1) | all_inputs[12]); // Current state of Knob 3 {B, A}
+      
     xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     sysState.inputs = all_inputs;     // Update system state
     xSemaphoreGive(sysState.mutex);
@@ -166,7 +189,6 @@ void scanKeysTask(void * pvParameters) {
   
     // Atomic store to ensure thread safety
     __atomic_store_n(&currentStepSize, localCurrentStepSize, __ATOMIC_RELAXED);
-    __atomic_store_n(&sysState.knob3Rotation, localKnob3Rotation, __ATOMIC_RELAXED);
   }
 }
 
@@ -177,23 +199,21 @@ void displayUpdateTask(void * pvParameters) {
     vTaskDelayUntil(&xLastWakeTime, xFrequency);
 
     const char* pressedKey = "None";
-    uint8_t knob3Rotation = 0;
 
     xSemaphoreTake(sysState.mutex, portMAX_DELAY);
     for (int i = 0; i < 12; i++) {    // Only first 12 bits are piano keys
-      if (!sysState.inputs[i]) {      // If bit is LOW (means that key is pressed)
+      if (!sysState.inputs[i]) {      // Check if bit is LOW (means that key is pressed)
         pressedKey = noteNames[i];
       }
     }
-    knob3Rotation = sysState.knob3Rotation;
     xSemaphoreGive(sysState.mutex);
 
     Serial.print("Pressed key: ");
     Serial.print(pressedKey);
     Serial.print(", Step size: ");
     Serial.print(currentStepSize);
-    Serial.print(", Knob 3 Rotation: ");
-    Serial.println(knob3Rotation);
+    Serial.print(", Volume: ");
+    Serial.println(knob3.getRotation());
 
     //Update display
     u8g2.clearBuffer();                   // clear the internal memory
@@ -201,9 +221,9 @@ void displayUpdateTask(void * pvParameters) {
     u8g2.drawStr(2,10,"Pressed key: ");   // write something to the internal memory
     u8g2.setCursor(75,10);
     u8g2.print(pressedKey);
-    u8g2.drawStr(2, 20, "Rotation:");
+    u8g2.drawStr(2, 20, "Volume:");
     u8g2.setCursor(75, 20);
-    u8g2.print(knob3Rotation);
+    u8g2.print(knob3.getRotation());
     u8g2.sendBuffer();                    // transfer internal memory to the display
 
     //Toggle LED
@@ -219,9 +239,7 @@ void sampleISR() {
 
   int32_t Vout = (phaseAcc >> 24) - 128;  // Convert to sawtooth waveform
 
-  int32_t localKnob3Rotation;
-  __atomic_load(&sysState.knob3Rotation, &localKnob3Rotation, __ATOMIC_RELAXED);
-  Vout = Vout >> (8 - localKnob3Rotation);  // Volume control
+  Vout = Vout >> (8 - knob3.getRotation());  // Volume control
   analogWrite(OUTR_PIN, Vout + 128);
 }
 
