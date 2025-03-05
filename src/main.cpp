@@ -67,21 +67,17 @@ public:
   void update(uint8_t currState) {
     int32_t localRotation = rotation.load();  // Load safely
     if ((prevState == 0b00 && currState == 0b01) ||
-        (prevState == 0b01 && currState == 0b11) ||
-        (prevState == 0b11 && currState == 0b10) ||
-        (prevState == 0b10 && currState == 0b00)) {
+        (prevState == 0b11 && currState == 0b10)) { // Clockwise
         localRotation++;
         lastDirection = 1;
-    } else if ((prevState == 0b00 && currState == 0b10) ||
-               (prevState == 0b10 && currState == 0b11) ||
-               (prevState == 0b11 && currState == 0b01) ||
-               (prevState == 0b01 && currState == 0b00)) {
+    } else if ((prevState == 0b10 && currState == 0b11) ||
+               (prevState == 0b01 && currState == 0b00)) { // Anticlockwise
         localRotation--;
         lastDirection = -1;
     } else if ((prevState == 0b00 && currState == 0b11) ||
                (prevState == 0b01 && currState == 0b10) ||
                (prevState == 0b10 && currState == 0b01) ||
-               (prevState == 0b11 && currState == 0b00)) {
+               (prevState == 0b11 && currState == 0b00)) { // Impossible/illegal transitions
         localRotation += lastDirection;
     }
     // Enforce limits
